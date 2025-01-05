@@ -1,33 +1,59 @@
-const int currentSensorPin = 34; // GPIO34 for ADC
-float sensitivity = 0.185;       // Sensitivity for ACS712 (e.g., 0.185V/A for 5A model)
-float vOffset = 2.5;             // ACS712 zero current voltage at 5V (default is ~2.5V)
-float adcResolution = 4096.0;    // ESP32 ADC resolution (12-bit)
-float vRef = 5.0;                // Reference voltage when powered by VIN (5V)
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-float zeroCurrentVoltage = 0.0;  // Store the voltage when there is no load
+const char* ssid = "Virus Detected";
+const char* password = "Sagar@react";
+const char* serverUrl = "http://192.168.1.36:3000/data";
+
+const int sensorPin = 35;  // GPIO 36 (ADC1_CH0)
 
 void setup() {
   Serial.begin(9600);
-  analogReadResolution(12); // Set ADC resolution to 12 bits
-
-  // Read zero current voltage at startup (without any load)
-  zeroCurrentVoltage = (analogRead(currentSensorPin) / adcResolution) * vRef;
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
 }
 
 void loop() {
-  int rawValue = analogRead(currentSensorPin); // Read ADC value
-  float sensorVoltage = (rawValue / adcResolution) * vRef; // Convert to voltage
-
-  // Calculate current with respect to the zero current voltage
-  float current = (sensorVoltage - zeroCurrentVoltage) / sensitivity;
-
-  Serial.print("Raw ADC Value: ");
-  Serial.print(rawValue);
-  Serial.print("\t Sensor Voltage: ");
-  Serial.print(sensorVoltage, 3);
-  Serial.print(" V\t Measured Current: ");
-  Serial.print(current, 3);
-  Serial.println(" A");
-
-  delay(1000); // Read every second
+  float current = readCurrent();
+  float power = calculatePower(current);
+  
+  String data = String(current, 3) + "," + String(power, 3);
+  sendData(data);
+  
+  delay(5000); // Send data every 5 seconds
 }
+
+float readCurrent() {
+  int sensorValue = analogRead(sensorPin);
+  float voltage = sensorValue * (3.3 / 4095.0);
+  float current = (voltage - 1.65) / 0.185; // For ACS712 10A version
+  return current;
+}
+
+float calculatePower(float current) {
+  float voltage = 12.0; // Assuming a stable 12V supply
+  return voltage * current;
+}
+
+void sendData(String data) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverUrl);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    
+    int httpResponseCode = http.POST("data=" + data);
+    
+    if (httpResponseCode > 0) {
+      Serial.println("Data sent successfully");
+    } else {
+      Serial.println("Error sending data");
+    }
+    
+    http.end();
+  }
+}
+
